@@ -5,17 +5,12 @@ char* message;
 
 void setup() {
   Serial.begin(9600);
-  Serial.println("ampl\tpeakVlt\tRMS\tamps");
   if ((message = (char *)malloc(255)) == NULL) {
     Serial.println("message malloc failed.");
   }
 }
 
 void toTwitter(char* message) {
-}
-
-void toSerial(char* message) {
-  Serial.println("here");
 }
 
 char *ftoa(char *a, double f, int precision){
@@ -31,7 +26,14 @@ char *ftoa(char *a, double f, int precision){
    return ret;
 }
 
-void loop() {
+char * allocAndFormat(char** bufPtr, double d) {
+    if ((*bufPtr = (char *)malloc(20)) == NULL) {
+      return "double malloc failed";
+    }
+    return ftoa(*bufPtr, d, 1);
+}
+
+void doLoop() {
   int minVal = 1024;
   int maxVal = 0;
   const int iters = 150;
@@ -45,20 +47,29 @@ void loop() {
   double peakVoltage = (5.0 / 1024) * amplitude / 2;
   double rms = peakVoltage / 1.41421356237;
   double amps = rms * 30; // TODO: what is 30?
-  if (message == NULL) {
-    Serial.println("message malloc failed.");
-  } else {
-    char* buf;
-    if ((buf = (char *)malloc(20)) == NULL) {
-      Serial.println("buf malloc failed");
-    } else {
-      if (sprintf(message, "%d\t%s\t%f\t%f", amplitude, ftoa(buf, peakVoltage, 1), rms, amps) <= 0) {
-        message = "sprintf failed.";
-      }
-      Serial.println(message);
-      free(buf);
-    }
+  double watts = peakVoltage * amps;
+  char* voltageBuf;
+  allocAndFormat(&voltageBuf, peakVoltage);
+  char* rmsBuf;
+  allocAndFormat(&rmsBuf, rms);
+  char* ampsBuf;
+  allocAndFormat(&ampsBuf, amps);
+  char* wattsBuf;
+  allocAndFormat(&wattsBuf, watts);
+  if (sprintf(message, "ampl=%d\tVolt=%s\tRMS=%s\tamps=%s\twatts=%s", 
+        amplitude, voltageBuf, rmsBuf, ampsBuf, wattsBuf) <= 0) {
+    message = "sprintf failed.";
   }
-  delay(5000);          
+  Serial.println(message);
+  free(voltageBuf);
+  free(rmsBuf);
+  free(ampsBuf);
+}
+
+void loop() {
+  if (message != NULL) {
+    doLoop();
+  }
+  delay(3000);          
 }
 
