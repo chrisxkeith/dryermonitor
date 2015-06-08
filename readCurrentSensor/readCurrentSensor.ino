@@ -64,6 +64,7 @@ void doLoop() {
   free(voltageBuf);
   free(rmsBuf);
   free(ampsBuf);
+  free(wattsBuf);
 }
 
 void loop() {
