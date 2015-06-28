@@ -9,19 +9,21 @@ const unsigned long MAX_UNSIGNED_LONG = 4294967295;
 
 const int sensorPin = A0;	// select the input pin for the electrical current sensor.
 char* message;
+unsigned long sensorstart;
 
 void setup() {
   Serial.begin(9600);
   if ((message = (char *)malloc(255)) == NULL) {
     Serial.println("message malloc failed.");
   }
+  sensorstart = millis();
 }
 
 unsigned long minSecToMillis(unsigned long minutes, unsigned long seconds) {
   return (minutes * 60 * 1000) + (seconds * 1000);
 }
 
-void toTwitter(char* message) {
+void sendMessage(char* message) {
 }
 
 char *ftoa(char *a, double f, int precision){
@@ -47,7 +49,7 @@ char * allocAndFormat(char** bufPtr, double d) {
 double readAmps() {
   int minVal = 1024;
   int maxVal = 0;
-  const int iters = 150;
+  const int iters = 150; // get 150 readings 1 ms apart.
   for (int i = 0; i < iters; i++) {
     int sensorValue = analogRead(sensorPin); 
     minVal  = min(sensorValue, minVal);
@@ -69,6 +71,7 @@ double readAmps() {
   allocAndFormat(&ampsBuf, amps);
   char* wattsBuf;
   allocAndFormat(&wattsBuf, watts);
+  // TODO : add timestamp
   if (sprintf(message, "ampl=%d\tVolt=%s\tRMS=%s\tamps=%s\twatts=%s", 
         amplitude, voltageBuf, rmsBuf, ampsBuf, wattsBuf) <= 0) {
     message = "sprintf failed.";
@@ -82,28 +85,73 @@ double readAmps() {
   return amps;
 }
 
-void monitorDryer() {
-  const double DRYER_AMPS = 7.0;
-  const double DRYER_THRESHOLD = DRYER_AMPS * 0.9;
-  const unsigned long WRINKLE_GUARD_SLEEP = minSecToMillis(4, 45);
-  const unsigned long WRINKLE_GUARD_ACTIVE = minSecToMillis(0, 15);
+// Check if two longs are within 'epsilon' of each other.
+boolean withinRangeL(long v1, long v2, long epsilon) {
+  return abs(v1 - v2) < epsilon;
+}
 
-  while (readAmps() < DRYER_THRESHOLD) {
-    delay(60 * 1000);    
+// Check if two doubles are within 'epsilon' of each other.
+boolean withinRangeD(double v1, double v2, double epsilon) {
+  return abs(v1 - v2) < epsilon;
+}
+
+// When the dryer goes into wrinkle guard mode, it is off for 04:45,
+// then powers on for 00:15.
+const unsigned long WRINKLE_GUARD_SLEEP = minSecToMillis(4, 45);
+const unsigned long WRINKLE_GUARD_ACTIVE = minSecToMillis(0, 15);
+const unsigned long WRINKLE_GUARD_CYCLE = WRINKLE_GUARD_SLEEP + WRINKLE_GUARD_ACTIVE;
+
+// Observed (approximate) amperage when dryer drum is turning.
+const double AMPS = 7.0;
+
+void monitorDryer() {
+
+  // Wait until dryer power indicates that drum is turning.
+  while (! withinRangeD(readAmps(), AMPS, AMPS * 0.9)) {
+    // Wait 90% of active power-on cycle to increase the odds of finding it.
+    delay((WRINKLE_GUARD_ACTIVE * 10) / 9);
   }
-  // Could be in a drying cycle or in a wrinkle guard active state.
-  unsigned long t = millis();
-  const unsigned long MAX_WRINKLE_GUARD_CYCLES = 50; // if we ever hit this, there's a bug.
+
+// Assume that the only 15 second power-on interval is the wrinkle guard interval,
+// and ignore all other power-on interals.
+// If this doesn't work, try checking for both sleep and power-on wrinkle guard cycle(s).
+
+  unsigned long powerOffInterval = WRINKLE_GUARD_SLEEP;
+  while (withinRangeL(powerOffInterval, WRINKLE_GUARD_SLEEP, 5)) {
+    
+    unsigned long powerOnInterval = MAX_UNSIGNED_LONG;
+    unsigned long intervalStart;
+    while (! withinRangeL(powerOnInterval, WRINKLE_GUARD_ACTIVE, 2)) {
+      // TODO : add a timeout to handle errors and edge cases.
+      intervalStart = millis();
+      while (withinRangeD(readAmps(), AMPS, AMPS * 0.9)) {
+        delay(minSecToMillis(0, 1));    
+      }
+      powerOnInterval = millis() - intervalStart;
+    }
+    
+    intervalStart = millis();
+    // Give onesself 30 seconds (approximate) to get to the dryer.
+    delay(WRINKLE_GUARD_SLEEP - minSecToMillis(0,30));
+    sendMessage("");
+
+    while (withinRangeD(readAmps(), AMPS, AMPS * 0.9)) {
+      delay(minSecToMillis(0, 1));    
+    }
+    powerOffInterval = millis() - intervalStart;
+  }
 }
 
 void loop() {
-  if (message != NULL) {
-    readAmps();
-    // Until code has been tested and debugged.
-    // monitorDryer();
-    delay(minSecToMillis(60, 0));          
-  } else {
+  if (message == NULL) {
     delay(MAX_UNSIGNED_LONG);
+  } else {
+    if (true) { // for testing sensor unit.
+      readAmps();
+      delay(minSecToMillis(0, 3));
+    } else {
+      monitorDryer();
+    }
   }
 }
 
