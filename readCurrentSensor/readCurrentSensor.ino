@@ -1,6 +1,6 @@
+// ... IN PROGRESS
 // http://opensource.org/licenses/MIT
 // Please credit : chris.keith@gmail.com
-// ... IN PROGRESS ...
 // Whole project overview : https://goo.gl/BTyQBJ
 
 #include <stdio.h>
@@ -9,19 +9,39 @@ const long MAX_LONG = 2147483647;
 const unsigned long MAX_UNSIGNED_LONG = 4294967295;
 
 const int sensorPin = A0;	// select the input pin for the electrical current sensor.
-char* message;
-unsigned long sensorstart;
-
-void setup() {
-  Serial.begin(9600);
-  if ((message = (char *)malloc(255)) == NULL) {
-    Serial.println("message malloc failed.");
-  }
-  sensorstart = millis();
-}
+char* gMessage;
 
 unsigned long minSecToMillis(unsigned long minutes, unsigned long seconds) {
   return (minutes * 60 * 1000) + (seconds * 1000);
+}
+
+char* toFormattedInterval(unsigned long i) {
+  unsigned long hours = i / minSecToMillis(60, 0);
+  unsigned long remainder = i % minSecToMillis(60, 0);
+  unsigned long minutes = remainder / minSecToMillis(1, 0);
+  remainder = remainder % minSecToMillis(1, 0);
+  unsigned long seconds = remainder / minSecToMillis(0, 1);
+  sprintf(gMessage, "%02i:%02i:%02i", (int)hours, (int)minutes, (int)seconds);
+  return gMessage;
+}
+
+void log(char* message) {
+  char* m;
+  if ((m = (char *)malloc(255)) == NULL) {
+    Serial.println("m malloc failed.");
+  } else {
+    sprintf(m, "%s\t%s", toFormattedInterval(millis()), message);
+    Serial.println(m);
+    free(m);
+  }
+}
+
+void setup() {
+  Serial.begin(9600);
+  if ((gMessage = (char *)malloc(255)) == NULL) {
+    Serial.println("message malloc failed.");
+  }
+  log("Program start.");
 }
 
 void sendMessage(char* message) {
@@ -61,7 +81,7 @@ double readAmps() {
   int amplitude = maxVal - minVal;
   double peakVoltage = (5.0 / 1024) * amplitude / 2;
   double rms = peakVoltage / 1.41421356237;
-  double amps = rms * 30; // TODO: what is 30?
+  double amps = rms * 30; // TODO: what is 30? check emails from mtoren.
   double watts = peakVoltage * amps;
   
   char* voltageBuf;
@@ -72,12 +92,19 @@ double readAmps() {
   allocAndFormat(&ampsBuf, amps);
   char* wattsBuf;
   allocAndFormat(&wattsBuf, watts);
-  // TODO : add timestamp
-  if (sprintf(message, "ampl=%d\tVolt=%s\tRMS=%s\tamps=%s\twatts=%s", 
-        amplitude, voltageBuf, rmsBuf, ampsBuf, wattsBuf) <= 0) {
-    message = "sprintf failed.";
+  char* m = NULL;
+  if ((m = (char *)malloc(255)) == NULL) {
+    log("m malloc failed.");
+  } else {
+    if (sprintf(m, "ampl=%d\tVolt=%s\tRMS=%s\tamps=%s\twatts=%s", 
+          amplitude, voltageBuf, rmsBuf, ampsBuf, wattsBuf) <= 0) {
+      m = "sprintf failed.";
+    }
   }
-  Serial.println(message);
+  if (m != NULL) {
+    log(m);
+    free(m);
+  }
   free(voltageBuf);
   free(rmsBuf);
   free(ampsBuf);
@@ -102,15 +129,16 @@ const unsigned long WRINKLE_GUARD_SLEEP = minSecToMillis(4, 45);
 const unsigned long WRINKLE_GUARD_ACTIVE = minSecToMillis(0, 15);
 const unsigned long WRINKLE_GUARD_CYCLE = WRINKLE_GUARD_SLEEP + WRINKLE_GUARD_ACTIVE;
 
-// Observed (approximate) amperage when dryer drum is turning.
-const double AMPS = 7.0;
+long waitForPowerOnInterval(unsigned long maxIters, unsigned int delaySeconds) {
+  // const double AMPS = 3.8; // for hair dryer at low setting.
+  // Observed (approximate) amperage when dryer drum is turning.
+  const double AMPS = 7.0;
 
-long waitForPowerOnInterval(unsigned long iters, unsigned int delaySeconds) {
   unsigned long i = 0;
   unsigned long intervalStart = millis();
   while (withinRangeD(readAmps(), AMPS, AMPS * 0.9)) {
     // Prevent infinite loop if something went wrong.
-    if (i >= iters) {
+    if (i >= maxIters) {
       return -1;
     }
     i++;
@@ -121,7 +149,7 @@ long waitForPowerOnInterval(unsigned long iters, unsigned int delaySeconds) {
 
 // Assume that the only 15 second power-on interval is the wrinkle guard interval,
 // and ignore all other power-on interals.
-// TODO : If this doesn't work, try checking for both sleep and power-on wrinkle guard cycle(s).
+// TODO : If this doesn't work, try checking for both sleep and power-on wrinkle guard interval(s).
 long handlePowerOn() {
   unsigned long powerOffInterval = WRINKLE_GUARD_SLEEP;
   while (withinRangeL(powerOffInterval, WRINKLE_GUARD_SLEEP, 5)) {
@@ -147,7 +175,7 @@ void monitorDryer() {
 }
 
 void loop() {
-  if (message == NULL) {
+  if (gMessage == NULL) {
     delay(MAX_UNSIGNED_LONG);
   } else {
     if (true) { // for testing sensor unit.
@@ -155,6 +183,7 @@ void loop() {
       delay(minSecToMillis(0, 3));
     } else {
       monitorDryer();
+      delay(minSecToMillis(4, 15));
     }
   }
 }
