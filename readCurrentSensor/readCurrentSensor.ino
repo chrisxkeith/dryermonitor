@@ -1,6 +1,7 @@
 // http://opensource.org/licenses/MIT
 // Please credit : chris.keith@gmail.com
 // ... IN PROGRESS ...
+// Whole project overview : https://goo.gl/BTyQBJ
 
 #include <stdio.h>
 
@@ -104,41 +105,44 @@ const unsigned long WRINKLE_GUARD_CYCLE = WRINKLE_GUARD_SLEEP + WRINKLE_GUARD_AC
 // Observed (approximate) amperage when dryer drum is turning.
 const double AMPS = 7.0;
 
-void monitorDryer() {
-
-  // Wait until dryer power indicates that drum is turning.
-  while (! withinRangeD(readAmps(), AMPS, AMPS * 0.9)) {
-    // Wait 90% of active power-on cycle to increase the odds of finding it.
-    delay((WRINKLE_GUARD_ACTIVE * 10) / 9);
+long waitForPowerOnInterval(unsigned long iters, unsigned int delaySeconds) {
+  unsigned long i = 0;
+  unsigned long intervalStart = millis();
+  while (withinRangeD(readAmps(), AMPS, AMPS * 0.9)) {
+    // Prevent infinite loop if something went wrong.
+    if (i >= iters) {
+      return -1;
+    }
+    i++;
+    delay(minSecToMillis(0, delaySeconds));
   }
+  return millis() - intervalStart;
+}
 
 // Assume that the only 15 second power-on interval is the wrinkle guard interval,
 // and ignore all other power-on interals.
-// If this doesn't work, try checking for both sleep and power-on wrinkle guard cycle(s).
-
+// TODO : If this doesn't work, try checking for both sleep and power-on wrinkle guard cycle(s).
+long handlePowerOn() {
   unsigned long powerOffInterval = WRINKLE_GUARD_SLEEP;
   while (withinRangeL(powerOffInterval, WRINKLE_GUARD_SLEEP, 5)) {
-    
     unsigned long powerOnInterval = MAX_UNSIGNED_LONG;
-    unsigned long intervalStart;
     while (! withinRangeL(powerOnInterval, WRINKLE_GUARD_ACTIVE, 2)) {
-      // TODO : add a timeout to handle errors and edge cases.
-      intervalStart = millis();
-      while (withinRangeD(readAmps(), AMPS, AMPS * 0.9)) {
-        delay(minSecToMillis(0, 1));    
-      }
-      powerOnInterval = millis() - intervalStart;
-    }
-    
-    intervalStart = millis();
-    // Give onesself 30 seconds (approximate) to get to the dryer.
-    delay(WRINKLE_GUARD_SLEEP - minSecToMillis(0,30));
-    sendMessage("");
+      unsigned long interval = waitForPowerOnInterval(20, 1);
+      unsigned long intervalStart = millis();
+      // Give onesself 30 seconds (approximate) to get to the dryer.
+      delay(WRINKLE_GUARD_SLEEP - minSecToMillis(0,30));
+      sendMessage("Dryer should start 15 second tumble cycle in 30 seconds.");
 
-    while (withinRangeD(readAmps(), AMPS, AMPS * 0.9)) {
-      delay(minSecToMillis(0, 1));    
+      interval = waitForPowerOnInterval(600, 1);
+      powerOffInterval = millis() - intervalStart;
     }
-    powerOffInterval = millis() - intervalStart;
+  }
+  return powerOffInterval;
+}
+
+void monitorDryer() {
+  if (waitForPowerOnInterval(20, (WRINKLE_GUARD_ACTIVE * 10) / 9) <= 0 > 0) {
+    handlePowerOn();
   }
 }
 
