@@ -7,9 +7,11 @@
 
 const long MAX_LONG = 2147483647;
 const unsigned long MAX_UNSIGNED_LONG = 4294967295;
+const unsigned int MAX_MESSAGE_SIZE = 127;
 
 const int sensorPin = A0;	// select the input pin for the electrical current sensor.
-char* gMessage;
+char gMessage[MAX_MESSAGE_SIZE];
+char prevMessage[MAX_MESSAGE_SIZE] = "";
 
 unsigned long minSecToMillis(unsigned long minutes, unsigned long seconds) {
   return (minutes * 60 * 1000) + (seconds * 1000);
@@ -21,7 +23,7 @@ char* toFormattedInterval(unsigned long i) {
   unsigned long minutes = remainder / minSecToMillis(1, 0);
   remainder = remainder % minSecToMillis(1, 0);
   unsigned long seconds = remainder / minSecToMillis(0, 1);
-  sprintf(gMessage, "%02i:%02i:%02i", (int)hours, (int)minutes, (int)seconds);
+  snprintf(gMessage, MAX_MESSAGE_SIZE, "%02i:%02i:%02i", (int)hours, (int)minutes, (int)seconds);
   return gMessage;
 }
 
@@ -30,17 +32,17 @@ void log(char* message) {
   if ((m = (char *)malloc(255)) == NULL) {
     Serial.println("m malloc failed.");
   } else {
-    sprintf(m, "%s\t%s", toFormattedInterval(millis()), message);
-    Serial.println(m);
+    if (strcmp(prevMessage, message) != 0) {
+      snprintf(m, MAX_MESSAGE_SIZE, "%s\t%s", toFormattedInterval(millis()), message);
+      Serial.println(m);
+      strncpy(prevMessage, message, 127);
+    }
     free(m);
   }
 }
 
 void setup() {
   Serial.begin(9600);
-  if ((gMessage = (char *)malloc(255)) == NULL) {
-    Serial.println("message malloc failed.");
-  }
   log("Program start.");
 }
 
@@ -96,9 +98,9 @@ double readAmps() {
   if ((m = (char *)malloc(255)) == NULL) {
     log("m malloc failed.");
   } else {
-    if (sprintf(m, "ampl=%d\tVolt=%s\tRMS=%s\tamps=%s\twatts=%s", 
+    if (snprintf(m, 255, "ampl=%d\tVolt=%s\tRMS=%s\tamps=%s\twatts=%s", 
           amplitude, voltageBuf, rmsBuf, ampsBuf, wattsBuf) <= 0) {
-      m = "sprintf failed.";
+      m = "snprintf failed.";
     }
   }
   if (m != NULL) {
