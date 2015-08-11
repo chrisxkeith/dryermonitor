@@ -28,11 +28,11 @@ char* toFormattedInterval(unsigned long i) {
 }
 
 void log(char* message) {
-  char* m;
-  if ((m = (char *)malloc(255)) == NULL) {
-    Serial.println("m malloc failed.");
-  } else {
-    if (strcmp(prevMessage, message) != 0) {
+  if (strcmp(prevMessage, message) != 0) {
+    char* m;
+    if ((m = (char *)malloc(MAX_MESSAGE_SIZE)) == NULL) {
+      Serial.println("m malloc failed.");
+    } else {
       snprintf(m, MAX_MESSAGE_SIZE, "%s\t%s", toFormattedInterval(millis()), message);
       Serial.println(m);
       strncpy(prevMessage, message, 127);
@@ -95,15 +95,13 @@ double readAmps() {
   char* wattsBuf;
   allocAndFormat(&wattsBuf, watts);
   char* m = NULL;
-  if ((m = (char *)malloc(255)) == NULL) {
+  if ((m = (char *)malloc(MAX_MESSAGE_SIZE)) == NULL) {
     log("m malloc failed.");
   } else {
-    if (snprintf(m, 255, "ampl=%d\tVolt=%s\tRMS=%s\tamps=%s\twatts=%s", 
+    if (snprintf(m, MAX_MESSAGE_SIZE, "ampl=%d\tVolt=%s\tRMS=%s\tamps=%s\twatts=%s", 
           amplitude, voltageBuf, rmsBuf, ampsBuf, wattsBuf) <= 0) {
       m = "snprintf failed.";
     }
-  }
-  if (m != NULL) {
     log(m);
     free(m);
   }
@@ -132,9 +130,8 @@ const unsigned long WRINKLE_GUARD_ACTIVE = minSecToMillis(0, 15);
 const unsigned long WRINKLE_GUARD_CYCLE = WRINKLE_GUARD_SLEEP + WRINKLE_GUARD_ACTIVE;
 
 long waitForPowerOnInterval(unsigned long maxIters, unsigned int delaySeconds) {
-  // const double AMPS = 3.8; // for hair dryer at low setting.
-  // Observed (approximate) amperage when dryer drum is turning.
-  const double AMPS = 7.0;
+  // const double AMPS = 3.8; // For hair dryer at low setting for testing.  
+  const double AMPS = 7.0; // Observed (approximate) amperage when dryer drum is turning.
 
   unsigned long i = 0;
   unsigned long intervalStart = millis();
@@ -170,23 +167,16 @@ long handlePowerOn() {
   return powerOffInterval;
 }
 
-void monitorDryer() {
-  if (waitForPowerOnInterval(20, (WRINKLE_GUARD_ACTIVE * 10) / 9) <= 0 > 0) {
-    handlePowerOn();
-  }
-}
-
 void loop() {
-  if (gMessage == NULL) {
-    delay(MAX_UNSIGNED_LONG);
+  if (true) { // for testing sensor unit.
+    readAmps();
+    delay(minSecToMillis(0, 3));
   } else {
-    if (true) { // for testing sensor unit.
-      readAmps();
-      delay(minSecToMillis(0, 3));
-    } else {
-      monitorDryer();
-      delay(minSecToMillis(4, 15));
+    // Assume that sensor unit has been initialized while dryer is off.
+    if (waitForPowerOnInterval(20, (WRINKLE_GUARD_ACTIVE * 10) / 9) > 0) {
+      handlePowerOn();
     }
+    delay(minSecToMillis(4, 15));
   }
 }
 
