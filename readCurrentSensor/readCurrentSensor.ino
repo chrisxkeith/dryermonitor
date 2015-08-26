@@ -10,7 +10,7 @@ const unsigned long MAX_UNSIGNED_LONG = 4294967295;
 const unsigned int MAX_MESSAGE_SIZE = 127;
 
 const int sensorPin = A0;	// select the input pin for the electrical current sensor.
-char gMessage[MAX_MESSAGE_SIZE];
+char gMessage[MAX_MESSAGE_SIZE] = "";
 char prevMessage[MAX_MESSAGE_SIZE] = "";
 
 unsigned long minSecToMillis(unsigned long minutes, unsigned long seconds) {
@@ -42,8 +42,9 @@ void log(char* message) {
 }
 
 void setup() {
-  Serial.begin(9600);
   log("Program start.");
+  Serial.begin(9600);
+  
 }
 
 void sendMessage(char* message) {
@@ -123,60 +124,46 @@ boolean withinRangeD(double v1, double v2, double epsilon) {
   return abs(v1 - v2) < epsilon;
 }
 
-// When the dryer goes into wrinkle guard mode, it is off for 04:45,
-// then powers on for 00:15.
-const unsigned long WRINKLE_GUARD_SLEEP = minSecToMillis(4, 45);
-const unsigned long WRINKLE_GUARD_ACTIVE = minSecToMillis(0, 15);
-const unsigned long WRINKLE_GUARD_CYCLE = WRINKLE_GUARD_SLEEP + WRINKLE_GUARD_ACTIVE;
-
-long waitForPowerOnInterval(unsigned long maxIters, unsigned int delaySeconds) {
-  // const double AMPS = 3.8; // For hair dryer at low setting for testing.  
-  const double AMPS = 7.0; // Observed (approximate) amperage when dryer drum is turning.
-
-  unsigned long i = 0;
-  unsigned long intervalStart = millis();
-  while (withinRangeD(readAmps(), AMPS, AMPS * 0.9)) {
-    // Prevent infinite loop if something went wrong.
-    if (i >= maxIters) {
-      return -1;
-    }
-    i++;
-    delay(minSecToMillis(0, delaySeconds));
+double AMPS = 7.0; // Observed (approximate) amperage when dryer drum is turning.
+void waitForPowerOnInterval() {
+  while (! withinRangeD(readAmps(), AMPS, AMPS * 0.9)) {
+    // TODO : Is it wasteful to check every second?
+    delay(minSecToMillis(0, 1));
   }
-  return millis() - intervalStart;
 }
 
-// Assume that the only 15 second power-on interval is the wrinkle guard interval,
-// and ignore all other power-on interals.
+  // When the dryer goes into wrinkle guard mode, it is off for 04:45,
+  // then powers on for 00:15.
+  const unsigned long WRINKLE_GUARD_SLEEP = minSecToMillis(4, 45);
+  const unsigned long WRINKLE_GUARD_ACTIVE = minSecToMillis(0, 15);
+
+// Assume that the only 15 (+/-) second power-on interval is the wrinkle guard interval,
+// and ignore all other power-on intervals.
 // TODO : If this doesn't work, try checking for both sleep and power-on wrinkle guard interval(s).
-long handlePowerOn() {
+void handlePowerOn() {
   unsigned long powerOffInterval = WRINKLE_GUARD_SLEEP;
   while (withinRangeL(powerOffInterval, WRINKLE_GUARD_SLEEP, 5)) {
     unsigned long powerOnInterval = MAX_UNSIGNED_LONG;
     while (! withinRangeL(powerOnInterval, WRINKLE_GUARD_ACTIVE, 2)) {
-      unsigned long interval = waitForPowerOnInterval(20, 1);
+      waitForPowerOnInterval();
       unsigned long intervalStart = millis();
-      // Give onesself 30 seconds (approximate) to get to the dryer.
+      // Give onesself 30 seconds (approximately) to get to the dryer.
       delay(WRINKLE_GUARD_SLEEP - minSecToMillis(0,30));
       sendMessage("Dryer should start 15 second tumble cycle in 30 seconds.");
-
-      interval = waitForPowerOnInterval(600, 1);
-      powerOffInterval = millis() - intervalStart;
     }
   }
-  return powerOffInterval;
 }
 
 void loop() {
-  if (true) { // for testing sensor unit.
+  if (true) { // for manually testing sensor unit.
+    AMPS = 3.8; // For hair dryer at "Low" setting.  
     readAmps();
     delay(minSecToMillis(0, 3));
   } else {
     // Assume that sensor unit has been initialized while dryer is off.
-    if (waitForPowerOnInterval(20, (WRINKLE_GUARD_ACTIVE * 10) / 9) > 0) {
-      handlePowerOn();
-    }
-    delay(minSecToMillis(4, 15));
+    waitForPowerOnInterval();
+    handlePowerOn();
+    delay(minSecToMillis(1, 0));
   }
 }
 
