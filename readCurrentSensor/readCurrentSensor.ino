@@ -13,6 +13,15 @@ const int sensorPin = A0;	// select the input pin for the electrical current sen
 char gMessage[MAX_MESSAGE_SIZE] = "";
 char prevMessage[MAX_MESSAGE_SIZE] = "";
 
+                // Observed (approximate) amperage when dryer drum is turning.
+double AMPS = 7.0;
+
+                // For automated testing.
+const bool testing = false;
+                // off, on, off, on,...
+const int testCycleSeconds[] = {5, 30, 5, 30, 5, 20, 10, 20, 10, 20, 10};
+int testCycleIndex = 0;
+
 unsigned long minSecToMillis(unsigned long minutes, unsigned long seconds) {
   return (minutes * 60 * 1000) + (seconds * 1000);
 }
@@ -66,6 +75,9 @@ char *ftoa(char *a, double f, int precision){
    while (*a != '\0') a++;
    *a++ = '.';
    long desimal = abs((long)((f - heiltal) * p[precision]));
+   if (desimal< p[precision-1]) {  //are there leading zeros?
+     *a='0'; a++;
+   }
    itoa(desimal, a, 10);
    return ret;
 }
@@ -80,14 +92,17 @@ char * allocAndFormat(char** bufPtr, double d) {
 double readAmps() {
   int minVal = 1024;
   int maxVal = 0;
-  const int iters = 150; // get 150 readings 1 ms apart.
-  for (int i = 0; i < iters; i++) {
-    int sensorValue = analogRead(sensorPin); 
-    minVal  = min(sensorValue, minVal);
-    maxVal  = max(sensorValue, maxVal);
-    delay(1L);
+  if (testing) {
+
+  } else {
+    const int iters = 150; // get 150 readings 1 ms apart.
+    for (int i = 0; i < iters; i++) {
+      int sensorValue = analogRead(sensorPin);
+      minVal  = min(sensorValue, minVal);
+      maxVal  = max(sensorValue, maxVal);
+      delay(1L);
+    }
   }
-  
   int amplitude = maxVal - minVal;
   double peakVoltage = (5.0 / 1024) * amplitude / 2;
   double rms = peakVoltage / 1.41421356237;
@@ -133,8 +148,6 @@ boolean withinRangeD(double v1, double v2, double epsilon) {
 
                 // If any interval takes longer than an hour, something has gone wrong.
 const unsigned int MAX_INTERVAL = minSecToMillis(60, 0);
-                // Observed (approximate) amperage when dryer drum is turning.
-double AMPS = 7.0;
 
 int waitForPowerOn(const unsigned int maxInterval) {
   unsigned int now = millis();
@@ -194,18 +207,16 @@ void handlePowerOn() {
 }
 
 void loop() {
-  if (true) {     // Manually test sensor unit.
-    AMPS = 3.8;   // For hair dryer at "Lo" setting.
-    if (true) {   // Just print readings.
+  if (true) { // Minimal manual validation
       readAmps();
       delay(minSecToMillis(0, 3));
-    } else {      // Manually do a simulation. on=30/off=2/30/2/20/10/20/10/...
-      wrinkleGuardOff = minSecToMillis(0, 20);
-      wrinkleGuardOn = minSecToMillis(0, 10);
-      warningInterval = minSecToMillis(0, 5);
-      waitForPowerOn(MAX_INTERVAL);
-      handlePowerOn();
-    }
+  }
+  else if (testing) {
+    wrinkleGuardOff = minSecToMillis(0, 20);
+    wrinkleGuardOn = minSecToMillis(0, 10);
+    warningInterval = minSecToMillis(0, 5);
+    waitForPowerOn(MAX_INTERVAL);
+    handlePowerOn();
   } else {
                   // Assume that sensor unit has been initialized while dryer is off.
     waitForPowerOn(MAX_UNSIGNED_LONG);
