@@ -36,29 +36,16 @@ char* toFormattedInterval(unsigned long i) {
   return gMessage;
 }
 
-char* fmtMessage(char* message) {
-    char* m;
-    if ((m = (char *)malloc(MAX_MESSAGE_SIZE)) == NULL) {
-      Serial.println("m malloc failed.");
-    } else {
-      snprintf(m, MAX_MESSAGE_SIZE, "%s\t%s", toFormattedInterval(millis()), message);
-      Serial.println(m);
-      strncpy(prevMessage, message, MAX_MESSAGE_SIZE - 1);
-    }
-    return m;
-}
-
+char logLine[MAX_MESSAGE_SIZE];
 void log(char* message) {
   if (strcmp(prevMessage, message) != 0) {
-    char* m = fmtMessage(message);
-    if (m != NULL) {
-      free(m);
-    }
+    snprintf(logLine, MAX_MESSAGE_SIZE, "%s\t%s", toFormattedInterval(millis()), message);
+    Serial.println(logLine);
+    strncpy(prevMessage, message, MAX_MESSAGE_SIZE - 1);
   }
 }
 
 void setup() {
-  log("Program start.");
   Serial.begin(9600);
 }
 
@@ -75,7 +62,7 @@ char *ftoa(char *a, double f, int precision){
    while (*a != '\0') a++;
    *a++ = '.';
    long desimal = abs((long)((f - heiltal) * p[precision]));
-   if (desimal< p[precision-1]) {  //are there leading zeros?
+   if (desimal < p[precision-1]) {  //are there leading zeros?
      *a='0'; a++;
    }
    itoa(desimal, a, 10);
@@ -86,29 +73,12 @@ char * allocAndFormat(char** bufPtr, double d) {
     if ((*bufPtr = (char *)malloc(20)) == NULL) {
       return "double malloc failed";
     }
-    return ftoa(*bufPtr, d, 1);
+    return ftoa(*bufPtr, d, 2);
 }
 
-double readAmps() {
-  int minVal = 1024;
-  int maxVal = 0;
-  if (testing) {
-
-  } else {
-    const int iters = 150; // get 150 readings 1 ms apart.
-    for (int i = 0; i < iters; i++) {
-      int sensorValue = analogRead(sensorPin);
-      minVal  = min(sensorValue, minVal);
-      maxVal  = max(sensorValue, maxVal);
-      delay(1L);
-    }
-  }
-  int amplitude = maxVal - minVal;
-  double peakVoltage = (5.0 / 1024) * amplitude / 2;
-  double rms = peakVoltage / 1.41421356237;
-  double amps = rms * 30; // TODO: what is 30? check emails from mtoren.
-  double watts = peakVoltage * amps;
-  
+char vals[MAX_MESSAGE_SIZE];
+void logValues(int maxVal, int minVal, int amplitude, double peakVoltage,
+               double rms, double amps, double watts) {
   char* voltageBuf;
   allocAndFormat(&voltageBuf, peakVoltage);
   char* rmsBuf;
@@ -117,22 +87,53 @@ double readAmps() {
   allocAndFormat(&ampsBuf, amps);
   char* wattsBuf;
   allocAndFormat(&wattsBuf, watts);
-  char* m = NULL;
-  if ((m = (char *)malloc(MAX_MESSAGE_SIZE)) == NULL) {
-    log("m malloc failed.");
+  if (snprintf(vals, MAX_MESSAGE_SIZE,
+      "max=%d\tmin=%d\tampl=%d\tVolt=%s\tRMS=%s\tamps=%s\twatts=%s", 
+      maxVal, minVal, amplitude, voltageBuf, rmsBuf, ampsBuf, wattsBuf) <= 0) {
+    log("snprintf failed.");
   } else {
-    if (snprintf(m, MAX_MESSAGE_SIZE, "ampl=%d\tVolt=%s\tRMS=%s\tamps=%s\twatts=%s", 
-          amplitude, voltageBuf, rmsBuf, ampsBuf, wattsBuf) <= 0) {
-      m = "snprintf failed.";
-    }
-    log(m);
-    free(m);
+    log(vals);
   }
   free(voltageBuf);
   free(rmsBuf);
   free(ampsBuf);
   free(wattsBuf);
-  
+}
+
+double readAmps() {
+  int minVal = 1023;
+  int maxVal = 0;
+  if (testing) {
+
+  } else {
+    const int iters = 500; // get 150 readings 1 ms apart.
+    for (int i = 0; i < iters; i++) {
+      int sensorValue = analogRead(sensorPin);
+      minVal  = min(sensorValue, minVal);
+      maxVal  = max(sensorValue, maxVal);
+      delay(1L);
+    }
+  }
+  int amplitude = maxVal - minVal;
+
+  // Noise ??? causing amplitude to never be zero. Kludge around it.
+  if (amplitude < 18) { // 18 > observed max noise.
+    amplitude = 0;
+  }
+
+  // Arduino at 5.0V, analog input is 0 - 1023.
+  double peakVoltage = (5.0 / 1024) * amplitude / 2;
+  double rms = peakVoltage / 1.41421356237;
+
+// Regarding the current sensor, the sensor we both have is configured in such
+// a way that when 1V of AC is passing through it on the output side, it means
+// that 30A is passing through it on the input side.  So, measure the amount
+// of AC voltage by computing the Root Mean Squared, and then multiply the
+// number of volts by 30 to arrive at the number of amps.
+
+  double amps = rms * 30;
+  double watts = peakVoltage * amps;
+  logValues(maxVal, minVal, amplitude, peakVoltage, rms, amps, watts);
   return amps;
 }
 
@@ -207,7 +208,7 @@ void handlePowerOn() {
 }
 
 void loop() {
-  if (true) { // Minimal manual validation
+  if (true) { // Minimal manual validation.
       readAmps();
       delay(minSecToMillis(0, 3));
   }
