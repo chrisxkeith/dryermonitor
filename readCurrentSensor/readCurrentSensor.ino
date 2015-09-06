@@ -12,15 +12,10 @@ const unsigned int MAX_MESSAGE_SIZE = 127;
 const int sensorPin = A0;	// select the input pin for the electrical current sensor.
 char gMessage[MAX_MESSAGE_SIZE] = "";
 char prevMessage[MAX_MESSAGE_SIZE] = "";
+double previousAmps = -1.0;
 
                 // Observed (approximate) amperage when dryer drum is turning.
 double AMPS = 7.0;
-
-                // For automated testing.
-const bool testing = false;
-                // off, on, off, on,...
-const int testCycleSeconds[] = {5, 30, 5, 30, 5, 20, 10, 20, 10, 20, 10};
-int testCycleIndex = 0;
 
 unsigned long minSecToMillis(unsigned long minutes, unsigned long seconds) {
   return (minutes * 60 * 1000) + (seconds * 1000);
@@ -76,9 +71,22 @@ char * allocAndFormat(char** bufPtr, double d) {
     return ftoa(*bufPtr, d, 2);
 }
 
+// Check if two longs are within 'epsilon' of each other.
+boolean withinRangeL(long v1, long v2, long epsilon) {
+  return abs(v1 - v2) < epsilon;
+}
+
+// Check if two doubles are within 'epsilon' of each other.
+boolean withinRangeD(double v1, double v2, double epsilon) {
+  return abs(v1 - v2) < epsilon;
+}
+
 char vals[MAX_MESSAGE_SIZE];
 void logValues(int maxVal, int minVal, int amplitude, double peakVoltage,
                double rms, double amps, double watts) {
+  if (withinRangeD(amps, previousAmps, 0.5)) {
+    return;
+  }
   char* voltageBuf;
   allocAndFormat(&voltageBuf, peakVoltage);
   char* rmsBuf;
@@ -98,21 +106,18 @@ void logValues(int maxVal, int minVal, int amplitude, double peakVoltage,
   free(rmsBuf);
   free(ampsBuf);
   free(wattsBuf);
+  previousAmps = amps;
 }
 
-double readAmps() {
+double readActualAmps() {
   int minVal = 1023;
   int maxVal = 0;
-  if (testing) {
-
-  } else {
-    const int iters = 500; // get 150 readings 1 ms apart.
-    for (int i = 0; i < iters; i++) {
-      int sensorValue = analogRead(sensorPin);
-      minVal  = min(sensorValue, minVal);
-      maxVal  = max(sensorValue, maxVal);
-      delay(1L);
-    }
+  const int iters = 500; // get 150 readings 1 ms apart.
+  for (int i = 0; i < iters; i++) {
+    int sensorValue = analogRead(sensorPin);
+    minVal  = min(sensorValue, minVal);
+    maxVal  = max(sensorValue, maxVal);
+    delay(1L);
   }
   int amplitude = maxVal - minVal;
 
@@ -137,14 +142,52 @@ double readAmps() {
   return amps;
 }
 
-// Check if two longs are within 'epsilon' of each other.
-boolean withinRangeL(long v1, long v2, long epsilon) {
-  return abs(v1 - v2) < epsilon;
-}
+enum test_status_type {
+  AUTOMATED,
+  MANUAL,
+  NONE
+};
+const test_status_type testStatus = MANUAL;
+const int TEST_ACTIVE_CYCLE_ON_SECS = 30;
+const int TEST_ACTIVE_CYCLE_OFF_SECS = 5;
+const int TEST_WRINKLE_CYCLE_ON_SECS = 15;
+const int TEST_WRINKLE_CYCLE_OFF_SECS = 10;
+const int TEST_CYCLE_SECONDS[] = {
+  TEST_ACTIVE_CYCLE_ON_SECS, TEST_ACTIVE_CYCLE_OFF_SECS,
+  TEST_ACTIVE_CYCLE_ON_SECS, TEST_ACTIVE_CYCLE_OFF_SECS,
+  TEST_WRINKLE_CYCLE_ON_SECS, TEST_WRINKLE_CYCLE_OFF_SECS,
+  TEST_WRINKLE_CYCLE_ON_SECS, TEST_WRINKLE_CYCLE_OFF_SECS,
+  TEST_WRINKLE_CYCLE_ON_SECS, TEST_WRINKLE_CYCLE_OFF_SECS,
+  TEST_WRINKLE_CYCLE_ON_SECS, TEST_WRINKLE_CYCLE_OFF_SECS,
+  TEST_WRINKLE_CYCLE_ON_SECS, TEST_WRINKLE_CYCLE_OFF_SECS
+};
+const unsigned int TOTAL_TEST_CYCLE_SECONDS = 195;
+bool stateAtSecondsDelta[TOTAL_TEST_CYCLE_SECONDS];
+unsigned int testStartTime = 0;
 
-// Check if two doubles are within 'epsilon' of each other.
-boolean withinRangeD(double v1, double v2, double epsilon) {
-  return abs(v1 - v2) < epsilon;
+double readAutomatedAmps() {
+  if (testStartTime == 0) {
+    testStartTime = millis();
+    int cycleIndex = 0;
+    int accum = TEST_CYCLE_SECONDS[cycleIndex];
+    bool on = true;
+    for (unsigned int i = 0; i < sizeof(stateAtSecondsDelta); i++) {
+     if (i >= accum) {
+      accum += TEST_CYCLE_SECONDS[++cycleIndex];
+      on = ! on;
+     }
+     stateAtSecondsDelta[i] = on;
+    }
+  }
+  double amps;
+  int seconds = ((millis() - testStartTime) / 1000) % TOTAL_TEST_CYCLE_SECONDS;
+  if (stateAtSecondsDelta[seconds]) {
+    amps = AMPS;
+  } else {
+    amps = 0.0;
+  }
+  logValues(0, 0, 0, 0.0, 0.0, amps, 0.0);
+  return amps;
 }
 
                 // If any interval takes longer than an hour, something has gone wrong.
@@ -152,7 +195,7 @@ const unsigned int MAX_INTERVAL = minSecToMillis(60, 0);
 
 int waitForPowerOn(const unsigned int maxInterval) {
   unsigned int now = millis();
-  while (! withinRangeD(readAmps(), AMPS, AMPS * 0.9)) {
+  while (! withinRangeD(readActualAmps(), AMPS, AMPS * 0.9)) {
     delay(minSecToMillis(0, 1));
     if (millis() - now > maxInterval) {
       return -1;
@@ -163,7 +206,7 @@ int waitForPowerOn(const unsigned int maxInterval) {
 
 int waitForPowerOff() {
   unsigned int now = millis();
-  while (withinRangeD(readAmps(), AMPS, AMPS * 0.9)) {
+  while (withinRangeD(readActualAmps(), AMPS, AMPS * 0.9)) {
     delay(minSecToMillis(0, 1));
     if (millis() - now > MAX_INTERVAL) {
       return -1;
@@ -207,23 +250,37 @@ void handlePowerOn() {
   }
 }
 
-void loop() {
-  if (true) { // Minimal manual validation.
-      readAmps();
-      delay(minSecToMillis(0, 3));
-  }
-  else if (testing) {
-    wrinkleGuardOff = minSecToMillis(0, 20);
-    wrinkleGuardOn = minSecToMillis(0, 10);
-    warningInterval = minSecToMillis(0, 5);
-    waitForPowerOn(MAX_INTERVAL);
-    handlePowerOn();
-  } else {
+void automatedTest() {
+  wrinkleGuardOff = minSecToMillis(0, TEST_WRINKLE_CYCLE_OFF_SECS);
+  wrinkleGuardOn = minSecToMillis(0, TEST_WRINKLE_CYCLE_ON_SECS);
+  warningInterval = minSecToMillis(0, 5);
+  readAutomatedAmps();
+//      waitForPowerOn(MAX_INTERVAL);
+//      handlePowerOn();
+}
+
+void doRun() {
                   // Assume that sensor unit has been initialized while dryer is off.
-    waitForPowerOn(MAX_UNSIGNED_LONG);
-    handlePowerOn();
-                  // Assume (if we start another load) it will take us more than 1 minute.
-    delay(minSecToMillis(1, 0));
+  waitForPowerOn(MAX_UNSIGNED_LONG);
+  handlePowerOn();
+}
+
+void loop() {
+  switch (testStatus) {
+    case AUTOMATED: {
+      automatedTest();
+      break;
+    }
+    case MANUAL: {
+      readActualAmps();
+      break;
+    }
+    case NONE:
+    default: {
+      doRun();
+      break;
+    }
   }
+  delay(minSecToMillis(0, 1));
 }
 
