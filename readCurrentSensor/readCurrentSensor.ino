@@ -147,13 +147,12 @@ enum test_status_type {
   MANUAL,
   NONE
 };
-const test_status_type testStatus = MANUAL;
-const int TEST_ACTIVE_CYCLE_ON_SECS = 30;
-const int TEST_ACTIVE_CYCLE_OFF_SECS = 5;
-const int TEST_WRINKLE_CYCLE_ON_SECS = 15;
-const int TEST_WRINKLE_CYCLE_OFF_SECS = 10;
+const test_status_type testStatus = AUTOMATED;
+const int TEST_ACTIVE_CYCLE_ON_SECS = 16;
+const int TEST_ACTIVE_CYCLE_OFF_SECS = 2;
+const int TEST_WRINKLE_CYCLE_ON_SECS = 4;
+const int TEST_WRINKLE_CYCLE_OFF_SECS = 8;
 const int TEST_CYCLE_SECONDS[] = {
-  TEST_ACTIVE_CYCLE_ON_SECS, TEST_ACTIVE_CYCLE_OFF_SECS,
   TEST_ACTIVE_CYCLE_ON_SECS, TEST_ACTIVE_CYCLE_OFF_SECS,
   TEST_WRINKLE_CYCLE_ON_SECS, TEST_WRINKLE_CYCLE_OFF_SECS,
   TEST_WRINKLE_CYCLE_ON_SECS, TEST_WRINKLE_CYCLE_OFF_SECS,
@@ -161,7 +160,7 @@ const int TEST_CYCLE_SECONDS[] = {
   TEST_WRINKLE_CYCLE_ON_SECS, TEST_WRINKLE_CYCLE_OFF_SECS,
   TEST_WRINKLE_CYCLE_ON_SECS, TEST_WRINKLE_CYCLE_OFF_SECS
 };
-const unsigned int TOTAL_TEST_CYCLE_SECONDS = 195;
+const unsigned int TOTAL_TEST_CYCLE_SECONDS = 78; // re-set if change TEST_* const's above.
 bool stateAtSecondsDelta[TOTAL_TEST_CYCLE_SECONDS];
 unsigned int testStartTime = 0;
 
@@ -190,12 +189,19 @@ double readAutomatedAmps() {
   return amps;
 }
 
+double readAmps() {
+  if (testStatus == AUTOMATED) {
+    return readAutomatedAmps();
+  }
+  return readActualAmps();
+}
+
                 // If any interval takes longer than an hour, something has gone wrong.
 const unsigned int MAX_INTERVAL = minSecToMillis(60, 0);
 
 int waitForPowerOn(const unsigned int maxInterval) {
   unsigned int now = millis();
-  while (! withinRangeD(readActualAmps(), AMPS, AMPS * 0.9)) {
+  while (! withinRangeD(readAmps(), AMPS, AMPS * 0.9)) {
     delay(minSecToMillis(0, 1));
     if (millis() - now > maxInterval) {
       return -1;
@@ -206,7 +212,7 @@ int waitForPowerOn(const unsigned int maxInterval) {
 
 int waitForPowerOff() {
   unsigned int now = millis();
-  while (withinRangeD(readActualAmps(), AMPS, AMPS * 0.9)) {
+  while (withinRangeD(readAmps(), AMPS, AMPS * 0.9)) {
     delay(minSecToMillis(0, 1));
     if (millis() - now > MAX_INTERVAL) {
       return -1;
@@ -230,7 +236,7 @@ void handlePowerOn() {
   if (waitForPowerOff() == -1) return;
   if (waitForPowerOn(MAX_INTERVAL) == -1) return;
   int onInterval = 0;
-  while (! withinRangeL(onInterval, wrinkleGuardOn, 2000)) {
+  while (! withinRangeL(onInterval, wrinkleGuardOn, 1000)) {
     onInterval = waitForPowerOff();
     if (onInterval == -1) {
       return;
@@ -239,7 +245,7 @@ void handlePowerOn() {
   }
   if (waitForPowerOff() == -1) return;
                 // Now it's at the beginning of the second wrinkle guard cycle.
-  while (withinRangeL(onInterval, wrinkleGuardOn, 2000)) {
+  while (withinRangeL(onInterval, wrinkleGuardOn, 1000)) {
     delay(wrinkleGuardOff - warningInterval);
     sendMessage("Dryer will start 15 second tumble cycle soon.");
     if (waitForPowerOn(MAX_INTERVAL) == -1) return;
@@ -250,19 +256,17 @@ void handlePowerOn() {
   }
 }
 
-void automatedTest() {
-  wrinkleGuardOff = minSecToMillis(0, TEST_WRINKLE_CYCLE_OFF_SECS);
-  wrinkleGuardOn = minSecToMillis(0, TEST_WRINKLE_CYCLE_ON_SECS);
-  warningInterval = minSecToMillis(0, 5);
-  readAutomatedAmps();
-//      waitForPowerOn(MAX_INTERVAL);
-//      handlePowerOn();
-}
-
 void doRun() {
                   // Assume that sensor unit has been initialized while dryer is off.
   waitForPowerOn(MAX_UNSIGNED_LONG);
   handlePowerOn();
+}
+
+void automatedTest() {
+  wrinkleGuardOff = minSecToMillis(0, TEST_WRINKLE_CYCLE_OFF_SECS);
+  wrinkleGuardOn = minSecToMillis(0, TEST_WRINKLE_CYCLE_ON_SECS);
+  warningInterval = minSecToMillis(0, TEST_WRINKLE_CYCLE_OFF_SECS - 1);
+  doRun();
 }
 
 void loop() {
