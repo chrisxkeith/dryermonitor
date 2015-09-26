@@ -5,9 +5,17 @@
 
 #include <stdio.h>
 
+enum test_status_type {
+  AUTOMATED,
+  MANUAL,
+  NONE
+};
+const test_status_type testStatus = AUTOMATED;
+
 const long MAX_LONG = 2147483647;
 const unsigned long MAX_UNSIGNED_LONG = 4294967295;
 const unsigned int MAX_MESSAGE_SIZE = 127;
+const long TIMEOUT_INDICATOR = -1;
 
 const int sensorPin = A0;	// select the input pin for the electrical current sensor.
 char gMessage[MAX_MESSAGE_SIZE] = "";
@@ -15,6 +23,7 @@ char prevMessage[MAX_MESSAGE_SIZE] = "";
 double previousAmps = -1.0;
 
                 // Observed (approximate) amperage when dryer drum is turning.
+                // Also hair dryer on 'Lo'.
 double AMPS = 7.0;
 
 unsigned long minSecToMillis(unsigned long minutes, unsigned long seconds) {
@@ -57,7 +66,7 @@ char *ftoa(char *a, double f, int precision){
    while (*a != '\0') a++;
    *a++ = '.';
    long desimal = abs((long)((f - heiltal) * p[precision]));
-   if (desimal < p[precision-1]) {  //are there leading zeros?
+   if (desimal < p[precision - 1]) {  //are there leading zeros?
      *a='0'; a++;
    }
    itoa(desimal, a, 10);
@@ -78,7 +87,12 @@ boolean withinRangeL(long v1, long v2, long epsilon) {
 
 // Check if two doubles are within 'epsilon' of each other.
 boolean withinRangeD(double v1, double v2, double epsilon) {
-  return abs(v1 - v2) < epsilon;
+  return abs(v1 - v2) <= epsilon;
+}
+
+// Check if two doubles are NOT within 'epsilon' of each other.
+boolean outsideRangeD(double v1, double v2, double epsilon) {
+  return abs(v1 - v2) > epsilon;
 }
 
 char vals[MAX_MESSAGE_SIZE];
@@ -142,12 +156,6 @@ double readActualAmps() {
   return amps;
 }
 
-enum test_status_type {
-  AUTOMATED,
-  MANUAL,
-  NONE
-};
-const test_status_type testStatus = AUTOMATED;
 const int TEST_ACTIVE_CYCLE_ON_SECS = 16;
 const int TEST_ACTIVE_CYCLE_OFF_SECS = 2;
 const int TEST_WRINKLE_CYCLE_ON_SECS = 4;
@@ -197,35 +205,32 @@ double readAmps() {
 }
 
                 // If any interval takes longer than an hour, something has gone wrong.
-const unsigned int MAX_INTERVAL = minSecToMillis(60, 0);
+const unsigned int ONE_HOUR = minSecToMillis(60, 0);
 
-int waitForPowerOn(const unsigned int maxInterval) {
+int waitForPowerChange( boolean (*f)(double, double, double), const long timeoutDelta) {
   unsigned int now = millis();
-  while (! withinRangeD(readAmps(), AMPS, AMPS * 0.9)) {
+  while (! (*f)(readAmps(), AMPS, AMPS * 0.9)) {
     delay(minSecToMillis(0, 1));
-    if (millis() - now > maxInterval) {
-      return -1;
+    if (millis() - now > timeoutDelta) {
+      return TIMEOUT_INDICATOR;
     }
   }
   return millis() - now;
 }
 
-int waitForPowerOff() {
-  unsigned int now = millis();
-  while (withinRangeD(readAmps(), AMPS, AMPS * 0.9)) {
-    delay(minSecToMillis(0, 1));
-    if (millis() - now > MAX_INTERVAL) {
-      return -1;
-    }
-  }
-  return millis() - now;
+int waitForPowerOn(const long timeoutDelta) {
+  return waitForPowerChange(withinRangeD, timeoutDelta);
+}
+
+int waitForPowerOff(const long timeoutDelta) {
+  return waitForPowerChange(outsideRangeD, timeoutDelta);
 }
 
                 // When the dryer goes into wrinkle guard mode, it is off for 04:45,
                 // then powers on for 00:15.
 unsigned long wrinkleGuardOff = minSecToMillis(4, 45);
 unsigned long wrinkleGuardOn = minSecToMillis(0, 15);
-                // Give onesself some time to get to the dryer.
+                // Give onesself 30 seconds to get to the dryer.
 unsigned int warningInterval = minSecToMillis(0, 30);
 
                 // Assume that the only power-on interval that takes 'wrinkleGuardOn' milliseconds
@@ -233,24 +238,24 @@ unsigned int warningInterval = minSecToMillis(0, 30);
                 // TODO : If this doesn't work, try checking for both
                 // on and off wrinkle guard intervals.
 void handlePowerOn() {
-  if (waitForPowerOff() == -1) return;
-  if (waitForPowerOn(MAX_INTERVAL) == -1) return;
+  if (waitForPowerOff(ONE_HOUR) == TIMEOUT_INDICATOR) return;
+  if (waitForPowerOn(ONE_HOUR) == TIMEOUT_INDICATOR) return;
   int onInterval = 0;
   while (! withinRangeL(onInterval, wrinkleGuardOn, 1000)) {
-    onInterval = waitForPowerOff();
-    if (onInterval == -1) {
+    onInterval = waitForPowerOff(ONE_HOUR);
+    if (onInterval == TIMEOUT_INDICATOR) {
       return;
     }
-    if (waitForPowerOn(MAX_INTERVAL) == -1) return;
+    if (waitForPowerOn(ONE_HOUR) == TIMEOUT_INDICATOR) return;
   }
-  if (waitForPowerOff() == -1) return;
+  if (waitForPowerOff(ONE_HOUR) == TIMEOUT_INDICATOR) return;
                 // Now it's at the beginning of the second wrinkle guard cycle.
   while (withinRangeL(onInterval, wrinkleGuardOn, 1000)) {
     delay(wrinkleGuardOff - warningInterval);
     sendMessage("Dryer will start 15 second tumble cycle soon.");
-    if (waitForPowerOn(MAX_INTERVAL) == -1) return;
-    onInterval = waitForPowerOff();
-    if (onInterval == -1) {
+    if (waitForPowerOn(ONE_HOUR) == TIMEOUT_INDICATOR) return;
+    onInterval = waitForPowerOff(ONE_HOUR);
+    if (onInterval == TIMEOUT_INDICATOR) {
       return;
     }
   }
