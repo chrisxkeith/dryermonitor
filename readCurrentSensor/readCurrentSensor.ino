@@ -17,6 +17,9 @@ const unsigned long MAX_UNSIGNED_LONG = 4294967295;
 const unsigned int MAX_MESSAGE_SIZE = 127;
 const long TIMEOUT_INDICATOR = -1;
 
+                // If any interval takes longer than an hour, something has gone wrong.
+const unsigned int ONE_HOUR = minSecToMillis(60, 0);
+
 const int sensorPin = A0;	// select the input pin for the electrical current sensor.
 char gMessage[MAX_MESSAGE_SIZE] = "";
 char prevMessage[MAX_MESSAGE_SIZE] = "";
@@ -126,7 +129,7 @@ void logValues(int maxVal, int minVal, int amplitude, double peakVoltage,
 double readActualAmps() {
   int minVal = 1023;
   int maxVal = 0;
-  const int iters = 500; // get 150 readings 1 ms apart.
+  const int iters = 500; // get this number of readings 1 ms apart.
   for (int i = 0; i < iters; i++) {
     int sensorValue = analogRead(sensorPin);
     minVal  = min(sensorValue, minVal);
@@ -155,6 +158,12 @@ double readActualAmps() {
   logValues(maxVal, minVal, amplitude, peakVoltage, rms, amps, watts);
   return amps;
 }
+                // When the dryer goes into wrinkle guard mode, it is off for 04:45,
+                // then powers on for 00:15.
+unsigned long wrinkleGuardOff = minSecToMillis(4, 45);
+unsigned long wrinkleGuardOn = minSecToMillis(0, 15);
+                // Give onesself 30 seconds to get to the dryer.
+unsigned int warningInterval = minSecToMillis(0, 30);
 
 const int TEST_ACTIVE_CYCLE_ON_SECS = 16;
 const int TEST_ACTIVE_CYCLE_OFF_SECS = 2;
@@ -172,22 +181,34 @@ const unsigned int TOTAL_TEST_CYCLE_SECONDS = 78; // re-set if change TEST_* con
 bool stateAtSecondsDelta[TOTAL_TEST_CYCLE_SECONDS];
 unsigned int testStartTime = 0;
 
-double readAutomatedAmps() {
+void automatedTest() {
+  char buf[32];
   if (testStartTime == 0) {
-    testStartTime = millis();
+    wrinkleGuardOff = minSecToMillis(0, TEST_WRINKLE_CYCLE_OFF_SECS);
+    wrinkleGuardOn = minSecToMillis(0, TEST_WRINKLE_CYCLE_ON_SECS);
+    warningInterval = minSecToMillis(0, TEST_WRINKLE_CYCLE_OFF_SECS - 1);
     int cycleIndex = 0;
-    int accum = TEST_CYCLE_SECONDS[cycleIndex];
     bool on = true;
+    int accum = TEST_CYCLE_SECONDS[cycleIndex];
     for (unsigned int i = 0; i < sizeof(stateAtSecondsDelta); i++) {
-     if (i >= accum) {
-      accum += TEST_CYCLE_SECONDS[++cycleIndex];
-      on = ! on;
-     }
-     stateAtSecondsDelta[i] = on;
+      if (i >= accum) {
+        accum += TEST_CYCLE_SECONDS[++cycleIndex];
+        on = ! on;
+       }
+      stateAtSecondsDelta[i] = on;
+      snprintf(buf, 32, "i: %d, state: %d", i, (int)on);
+      log(buf);
     }
+    testStartTime = millis();
+    snprintf(buf, 32, "testStartTime: %d", testStartTime);
+    log(buf);
   }
-  double amps;
+  doRun();
+}
+
+double readAutomatedAmps() {
   int seconds = ((millis() - testStartTime) / 1000) % TOTAL_TEST_CYCLE_SECONDS;
+  double amps;
   if (stateAtSecondsDelta[seconds]) {
     amps = AMPS;
   } else {
@@ -203,9 +224,6 @@ double readAmps() {
   }
   return readActualAmps();
 }
-
-                // If any interval takes longer than an hour, something has gone wrong.
-const unsigned int ONE_HOUR = minSecToMillis(60, 0);
 
 int waitForPowerChange( boolean (*f)(double, double, double), const long timeoutDelta) {
   unsigned int now = millis();
@@ -226,34 +244,32 @@ int waitForPowerOff(const long timeoutDelta) {
   return waitForPowerChange(outsideRangeD, timeoutDelta);
 }
 
-                // When the dryer goes into wrinkle guard mode, it is off for 04:45,
-                // then powers on for 00:15.
-unsigned long wrinkleGuardOff = minSecToMillis(4, 45);
-unsigned long wrinkleGuardOn = minSecToMillis(0, 15);
-                // Give onesself 30 seconds to get to the dryer.
-unsigned int warningInterval = minSecToMillis(0, 30);
-
                 // Assume that the only power-on interval that takes 'wrinkleGuardOn' milliseconds
                 // is indeed the wrinkle guard interval (and not some other stage in the cycle).
                 // TODO : If this doesn't work, try checking for both
                 // on and off wrinkle guard intervals.
 void handlePowerOn() {
-  if (waitForPowerOff(ONE_HOUR) == TIMEOUT_INDICATOR) return;
-  if (waitForPowerOn(ONE_HOUR) == TIMEOUT_INDICATOR) return;
-  int onInterval = 0;
-  while (! withinRangeL(onInterval, wrinkleGuardOn, 1000)) {
+  long onInterval = MAX_LONG; // To get into the loop the first time.
+  // Allow 3 seconds for delta check.
+  while (! withinRangeL(onInterval, wrinkleGuardOn, 3000)) {
     onInterval = waitForPowerOff(ONE_HOUR);
     if (onInterval == TIMEOUT_INDICATOR) {
       return;
     }
-    if (waitForPowerOn(ONE_HOUR) == TIMEOUT_INDICATOR) return;
+    if (waitForPowerOn(ONE_HOUR) == TIMEOUT_INDICATOR) {
+      return;
+    }
   }
-  if (waitForPowerOff(ONE_HOUR) == TIMEOUT_INDICATOR) return;
-                // Now it's at the beginning of the second wrinkle guard cycle.
-  while (withinRangeL(onInterval, wrinkleGuardOn, 1000)) {
+  if (waitForPowerOff(ONE_HOUR) == TIMEOUT_INDICATOR) {
+    return;
+  }
+                // Now it's at the beginning of the second wrinkle guard on cycle.
+  while (withinRangeL(onInterval, wrinkleGuardOn, 3000)) {
     delay(wrinkleGuardOff - warningInterval);
     sendMessage("Dryer will start 15 second tumble cycle soon.");
-    if (waitForPowerOn(ONE_HOUR) == TIMEOUT_INDICATOR) return;
+    if (waitForPowerOn(ONE_HOUR) == TIMEOUT_INDICATOR) {
+      return;
+    }
     onInterval = waitForPowerOff(ONE_HOUR);
     if (onInterval == TIMEOUT_INDICATOR) {
       return;
@@ -265,13 +281,6 @@ void doRun() {
                   // Assume that sensor unit has been initialized while dryer is off.
   waitForPowerOn(MAX_UNSIGNED_LONG);
   handlePowerOn();
-}
-
-void automatedTest() {
-  wrinkleGuardOff = minSecToMillis(0, TEST_WRINKLE_CYCLE_OFF_SECS);
-  wrinkleGuardOn = minSecToMillis(0, TEST_WRINKLE_CYCLE_ON_SECS);
-  warningInterval = minSecToMillis(0, TEST_WRINKLE_CYCLE_OFF_SECS - 1);
-  doRun();
 }
 
 void loop() {
