@@ -57,7 +57,9 @@ void setup() {
 }
 
 void sendMessage(char* message) {
-  log("Message would have been sent...");
+  char msg[MAX_MESSAGE_SIZE];
+  snprintf(msg, MAX_MESSAGE_SIZE, "Message would have been sent: %s", message);
+  log(msg);
 }
 
 char *ftoa(char *a, double f, int precision){
@@ -179,11 +181,11 @@ const int TEST_CYCLE_SECONDS[] = {
 };
 const unsigned int TOTAL_TEST_CYCLE_SECONDS = 78; // re-set if change TEST_* const's above.
 bool stateAtSecondsDelta[TOTAL_TEST_CYCLE_SECONDS];
-unsigned int testStartTime = 0;
+long testStartTime = -1;
 
 void automatedTest() {
   char buf[32];
-  if (testStartTime == 0) {
+  if (testStartTime == -1) {
     wrinkleGuardOff = minSecToMillis(0, TEST_WRINKLE_CYCLE_OFF_SECS);
     wrinkleGuardOn = minSecToMillis(0, TEST_WRINKLE_CYCLE_ON_SECS);
     warningInterval = minSecToMillis(0, TEST_WRINKLE_CYCLE_OFF_SECS - 1);
@@ -197,7 +199,7 @@ void automatedTest() {
        }
       stateAtSecondsDelta[i] = on;
       snprintf(buf, 32, "i: %d, state: %d", i, (int)on);
-      log(buf);
+//      log(buf);
     }
     testStartTime = millis();
     snprintf(buf, 32, "testStartTime: %d", testStartTime);
@@ -249,12 +251,15 @@ int waitForPowerOff(const long timeoutDelta) {
                 // TODO : If this doesn't work, try checking for both
                 // on and off wrinkle guard intervals.
 void handlePowerOn() {
-  long onInterval = MAX_LONG; // To get into the loop the first time.
-  // Allow 3 seconds for delta check.
-  while (! withinRangeL(onInterval, wrinkleGuardOn, 3000)) {
+  long onInterval;
+  while (true) {
     onInterval = waitForPowerOff(ONE_HOUR);
     if (onInterval == TIMEOUT_INDICATOR) {
       return;
+    }
+    // Allow 3 seconds for delta check.
+    if (withinRangeL(onInterval, wrinkleGuardOn, 3000)) {
+      break;
     }
     if (waitForPowerOn(ONE_HOUR) == TIMEOUT_INDICATOR) {
       return;
@@ -266,7 +271,10 @@ void handlePowerOn() {
                 // Now it's at the beginning of the second wrinkle guard on cycle.
   while (withinRangeL(onInterval, wrinkleGuardOn, 3000)) {
     delay(wrinkleGuardOff - warningInterval);
-    sendMessage("Dryer will start 15 second tumble cycle soon.");
+    char m[MAX_MESSAGE_SIZE];
+    snprintf(m, MAX_MESSAGE_SIZE, "Dryer will start 15 second tumble cycle in %d seconds.",
+            warningInterval / 1000);
+    sendMessage(m);
     if (waitForPowerOn(ONE_HOUR) == TIMEOUT_INDICATOR) {
       return;
     }
