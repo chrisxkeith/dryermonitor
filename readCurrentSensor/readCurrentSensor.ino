@@ -4,6 +4,9 @@
 // Whole project overview : https://goo.gl/BTyQBJ
 
 #include <stdio.h>
+#include <SPI.h>
+#include <Ethernet.h>
+#include <Twitter.h>
 
 enum test_status_type {
   AUTOMATED,
@@ -14,7 +17,7 @@ const test_status_type testStatus = AUTOMATED;
 
 const long MAX_LONG = 2147483647;
 const unsigned long MAX_UNSIGNED_LONG = 4294967295;
-const unsigned int MAX_MESSAGE_SIZE = 127;
+const unsigned int MAX_MESSAGE_SIZE = 96;
 const unsigned long TIMEOUT_INDICATOR = MAX_UNSIGNED_LONG;
 
                 // If any interval takes longer than an hour, something has gone wrong.
@@ -22,7 +25,6 @@ const unsigned long ONE_HOUR = minSecToMillis(60, 0);
 
 const int sensorPin = A0;	// select the input pin for the electrical current sensor.
 char gMessage[MAX_MESSAGE_SIZE] = "";
-char prevMessage[MAX_MESSAGE_SIZE] = "";
 double previousAmps = -1.0;
 unsigned long previousLogTime = MAX_UNSIGNED_LONG;
 
@@ -46,7 +48,6 @@ char* toFormattedInterval(unsigned long i) {
 
 char logLine[MAX_MESSAGE_SIZE];
 void log(char* message) {
-  if (strcmp(prevMessage, message) != 0) {
     unsigned long logInterval = 0;
     if (previousLogTime != MAX_UNSIGNED_LONG) {
       logInterval = (millis() - previousLogTime) / 1000;
@@ -55,18 +56,44 @@ void log(char* message) {
     snprintf(logLine, MAX_MESSAGE_SIZE, "%s [%d]\t%s",
             toFormattedInterval(previousLogTime), (unsigned int)logInterval, message);
     Serial.println(logLine);
-    strncpy(prevMessage, message, MAX_MESSAGE_SIZE - 1);
+}
+
+byte mac[] = { 0x90, 0xA2, 0xDA, 0x00, 0xF5, 0xFE };
+// byte ip[] = { 192, 168, 100, 9 };
+Twitter twitter("TODO : Replace this text with your token");
+
+void postToTwitter(char msg[]) {
+  if (twitter.post(msg)) {
+    int status = twitter.wait(&Serial);
+    if (status == 200) {
+      Serial.println("OK.");
+    } else {
+      Serial.print("failed : code ");
+      Serial.println(status);
+    }
+  } else {
+    Serial.println("twitter.post() failed.");
   }
 }
 
 void setup() {
   Serial.begin(9600);
+/*
+  log("Before Ethernet.begin");
+  if (Ethernet.begin(mac) == 0) {
+    log("Ethernet.begin failed.");
+  }
+  log("After Ethernet.begin");
+  log(Ethernet.localIP());
+  postToTwitter("Starting dryer monitor.");
+*/
 }
 
 void sendMessage(char* message) {
   char msg[MAX_MESSAGE_SIZE];
-  snprintf(msg, MAX_MESSAGE_SIZE, "Message would have been sent: %s", message);
+  snprintf(msg, MAX_MESSAGE_SIZE, "Msg: %s", message);
   log(msg);
+//  postToTwitter(message);
 }
 
 char *ftoa(char *a, double f, int precision){
@@ -107,6 +134,7 @@ boolean outsideRangeD(double v1, double v2, double epsilon) {
   return abs(v1 - v2) > epsilon;
 }
 
+/*
 char vals[MAX_MESSAGE_SIZE];
 void logValues(int maxVal, int minVal, int amplitude, double peakVoltage,
                double rms, double amps, double watts) {
@@ -132,6 +160,20 @@ void logValues(int maxVal, int minVal, int amplitude, double peakVoltage,
   free(rmsBuf);
   free(ampsBuf);
   free(wattsBuf);
+  previousAmps = amps;
+}
+*/
+void logAmps(double amps) {
+  if (withinRangeD(amps, previousAmps, 0.5)) {
+    return;
+  }
+  char ampsBuf[20];
+  char vals[32];
+  if (snprintf(vals, 32, "amps=%s", ftoa(ampsBuf, amps, 2)) <= 0) {
+    log("snprintf failed.");
+  } else {
+    log(vals);
+  }
   previousAmps = amps;
 }
 
@@ -164,7 +206,7 @@ double readActualAmps() {
 
   double amps = rms * 30;
   double watts = peakVoltage * amps;
-  logValues(maxVal, minVal, amplitude, peakVoltage, rms, amps, watts);
+  logAmps(amps);
   return amps;
 }
                 // When the dryer goes into wrinkle guard mode, it is off for 04:45,
@@ -223,7 +265,7 @@ double readAutomatedAmps() {
   } else {
     amps = 0.0;
   }
-  logValues(0, 0, 0, 0.0, 0.0, amps, 0.0);
+  logAmps(amps);
   return amps;
 }
 
