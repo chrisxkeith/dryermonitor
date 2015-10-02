@@ -15,15 +15,16 @@ const test_status_type testStatus = AUTOMATED;
 const long MAX_LONG = 2147483647;
 const unsigned long MAX_UNSIGNED_LONG = 4294967295;
 const unsigned int MAX_MESSAGE_SIZE = 127;
-const long TIMEOUT_INDICATOR = -1;
+const unsigned long TIMEOUT_INDICATOR = MAX_UNSIGNED_LONG;
 
                 // If any interval takes longer than an hour, something has gone wrong.
-const unsigned int ONE_HOUR = minSecToMillis(60, 0);
+const unsigned long ONE_HOUR = minSecToMillis(60, 0);
 
 const int sensorPin = A0;	// select the input pin for the electrical current sensor.
 char gMessage[MAX_MESSAGE_SIZE] = "";
 char prevMessage[MAX_MESSAGE_SIZE] = "";
 double previousAmps = -1.0;
+unsigned long previousLogTime = MAX_UNSIGNED_LONG;
 
                 // Observed (approximate) amperage when dryer drum is turning.
                 // Also hair dryer on 'Lo'.
@@ -46,7 +47,13 @@ char* toFormattedInterval(unsigned long i) {
 char logLine[MAX_MESSAGE_SIZE];
 void log(char* message) {
   if (strcmp(prevMessage, message) != 0) {
-    snprintf(logLine, MAX_MESSAGE_SIZE, "%s\t%s", toFormattedInterval(millis()), message);
+    unsigned long logInterval = 0;
+    if (previousLogTime != MAX_UNSIGNED_LONG) {
+      logInterval = (millis() - previousLogTime) / 1000;
+    }
+    previousLogTime = millis();
+    snprintf(logLine, MAX_MESSAGE_SIZE, "%s [%d]\t%s",
+            toFormattedInterval(previousLogTime), (unsigned int)logInterval, message);
     Serial.println(logLine);
     strncpy(prevMessage, message, MAX_MESSAGE_SIZE - 1);
   }
@@ -115,8 +122,8 @@ void logValues(int maxVal, int minVal, int amplitude, double peakVoltage,
   char* wattsBuf;
   allocAndFormat(&wattsBuf, watts);
   if (snprintf(vals, MAX_MESSAGE_SIZE,
-      "max=%d\tmin=%d\tampl=%d\tVolt=%s\tRMS=%s\tamps=%s\twatts=%s", 
-      maxVal, minVal, amplitude, voltageBuf, rmsBuf, ampsBuf, wattsBuf) <= 0) {
+      "amps=%s\tmax=%d\tmin=%d\tampl=%d\tVolt=%s\tRMS=%s\twatts=%s", 
+      ampsBuf, maxVal, minVal, amplitude, voltageBuf, rmsBuf, wattsBuf) <= 0) {
     log("snprintf failed.");
   } else {
     log(vals);
@@ -177,15 +184,15 @@ const int TEST_CYCLE_SECONDS[] = {
   TEST_WRINKLE_CYCLE_ON_SECS, TEST_WRINKLE_CYCLE_OFF_SECS,
   TEST_WRINKLE_CYCLE_ON_SECS, TEST_WRINKLE_CYCLE_OFF_SECS,
   TEST_WRINKLE_CYCLE_ON_SECS, TEST_WRINKLE_CYCLE_OFF_SECS,
-  TEST_WRINKLE_CYCLE_ON_SECS, TEST_WRINKLE_CYCLE_OFF_SECS
+  TEST_WRINKLE_CYCLE_ON_SECS, 24 // simulate a 'dryer unused' period.
 };
-const unsigned int TOTAL_TEST_CYCLE_SECONDS = 78; // re-set if change TEST_* const's above.
+const unsigned int TOTAL_TEST_CYCLE_SECONDS = 94; // Change if total test cycle time changes.
 bool stateAtSecondsDelta[TOTAL_TEST_CYCLE_SECONDS];
-long testStartTime = -1;
+unsigned long testStartTime = MAX_UNSIGNED_LONG;
 
 void automatedTest() {
-  char buf[32];
-  if (testStartTime == -1) {
+  if (testStartTime == MAX_UNSIGNED_LONG) {
+    char buf[32];
     wrinkleGuardOff = minSecToMillis(0, TEST_WRINKLE_CYCLE_OFF_SECS);
     wrinkleGuardOn = minSecToMillis(0, TEST_WRINKLE_CYCLE_ON_SECS);
     warningInterval = minSecToMillis(0, TEST_WRINKLE_CYCLE_OFF_SECS - 1);
@@ -209,9 +216,9 @@ void automatedTest() {
 }
 
 double readAutomatedAmps() {
-  int seconds = ((millis() - testStartTime) / 1000) % TOTAL_TEST_CYCLE_SECONDS;
+  unsigned long seconds = ((millis() - testStartTime) / 1000) % TOTAL_TEST_CYCLE_SECONDS;
   double amps;
-  if (stateAtSecondsDelta[seconds]) {
+  if (stateAtSecondsDelta[(int)seconds]) {
     amps = AMPS;
   } else {
     amps = 0.0;
@@ -227,34 +234,36 @@ double readAmps() {
   return readActualAmps();
 }
 
-int waitForPowerChange( boolean (*f)(double, double, double), const long timeoutDelta) {
-  unsigned int now = millis();
-  while (! (*f)(readAmps(), AMPS, AMPS * 0.9)) {
+unsigned long waitForPowerChange( boolean (*f)(double, double, double), const unsigned long timeoutDelta) {
+  unsigned long start = millis();
+  while ((*f)(readAmps(), AMPS, AMPS * 0.9)) {
     delay(minSecToMillis(0, 1));
-    if (millis() - now > timeoutDelta) {
+    if (millis() - start > timeoutDelta) {
       return TIMEOUT_INDICATOR;
     }
   }
-  return millis() - now;
+  return millis() - start;
 }
 
-int waitForPowerOn(const long timeoutDelta) {
-  return waitForPowerChange(withinRangeD, timeoutDelta);
-}
-
-int waitForPowerOff(const long timeoutDelta) {
+unsigned long waitForPowerOn(const long timeoutDelta) {
   return waitForPowerChange(outsideRangeD, timeoutDelta);
 }
 
+unsigned long waitForPowerOff(const long timeoutDelta) {
+  return waitForPowerChange(withinRangeD, timeoutDelta);
+}
+
+void doRun() {
+                  // Assume that sensor unit has been initialized while dryer is off.
+  waitForPowerOn(MAX_UNSIGNED_LONG);
                 // Assume that the only power-on interval that takes 'wrinkleGuardOn' milliseconds
                 // is indeed the wrinkle guard interval (and not some other stage in the cycle).
-                // TODO : If this doesn't work, try checking for both
-                // on and off wrinkle guard intervals.
-void handlePowerOn() {
-  long onInterval;
+                // TODO : If this doesn't work, try checking for both on and off wrinkle guard intervals.
+  unsigned long onInterval;
   while (true) {
     onInterval = waitForPowerOff(ONE_HOUR);
     if (onInterval == TIMEOUT_INDICATOR) {
+      log("doRun: TIMEOUT 1.");
       return;
     }
     // Allow 3 seconds for delta check.
@@ -262,33 +271,37 @@ void handlePowerOn() {
       break;
     }
     if (waitForPowerOn(ONE_HOUR) == TIMEOUT_INDICATOR) {
+      log("doRun: TIMEOUT 2.");
       return;
     }
   }
   if (waitForPowerOff(ONE_HOUR) == TIMEOUT_INDICATOR) {
+    log("doRun: TIMEOUT 3.");
     return;
   }
-                // Now it's at the beginning of the second wrinkle guard on cycle.
+                // Now it's at the beginning of the second wrinkle guard off cycle.
   while (withinRangeL(onInterval, wrinkleGuardOn, 3000)) {
     delay(wrinkleGuardOff - warningInterval);
     char m[MAX_MESSAGE_SIZE];
     snprintf(m, MAX_MESSAGE_SIZE, "Dryer will start 15 second tumble cycle in %d seconds.",
             warningInterval / 1000);
     sendMessage(m);
-    if (waitForPowerOn(ONE_HOUR) == TIMEOUT_INDICATOR) {
+    unsigned long offInterval = waitForPowerOn(ONE_HOUR); 
+    if (offInterval == TIMEOUT_INDICATOR) {
+      log("doRun: TIMEOUT 4.");
       return;
     }
+//    snprintf(m, MAX_MESSAGE_SIZE, "offInterval : %d millis.", (int)offInterval);
+//    log(m);
+    
     onInterval = waitForPowerOff(ONE_HOUR);
+//    snprintf(m, MAX_MESSAGE_SIZE, "onInterval : %d millis.", (int)onInterval);
+//    log(m);
     if (onInterval == TIMEOUT_INDICATOR) {
+      log("doRun: TIMEOUT 5.");
       return;
     }
   }
-}
-
-void doRun() {
-                  // Assume that sensor unit has been initialized while dryer is off.
-  waitForPowerOn(MAX_UNSIGNED_LONG);
-  handlePowerOn();
 }
 
 void loop() {
@@ -307,6 +320,5 @@ void loop() {
       break;
     }
   }
-  delay(minSecToMillis(0, 1));
 }
 
