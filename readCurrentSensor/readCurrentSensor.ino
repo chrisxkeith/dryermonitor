@@ -346,6 +346,21 @@ void doRun() {
   }
 }
 
+void showActualAmps() {
+  double amps = readActualAmps();
+  if (!withinRangeD(amps, previousAmps, 0.5)) {
+    char ampsBuf[20];
+    char vals[48];
+    if (snprintf(vals, 48, "dryer : amps=%s", ftoa(ampsBuf, amps, 2)) <= 0) {
+      strncpy(vals, "dryer : snprintf failed.", 48);
+    }
+    log(vals);
+    sendMessage(vals);
+    previousAmps = amps;
+    delay(1000);
+  }
+}
+
 void loop() {
   switch (testStatus) {
     case AUTOMATED: {
@@ -353,7 +368,7 @@ void loop() {
       break;
     }
     case MANUAL: {
-      readActualAmps();
+      showActualAmps();
       break;
     }
     case NONE:
