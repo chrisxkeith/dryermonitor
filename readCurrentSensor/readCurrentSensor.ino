@@ -14,6 +14,7 @@ enum test_status_type {
   NONE
 };
 const test_status_type testStatus = AUTOMATED;
+const bool use_network = false;
 
 const long MAX_LONG = 2147483647;
 const unsigned long MAX_UNSIGNED_LONG = 4294967295;
@@ -78,22 +79,24 @@ void postToTwitter(char msg[]) {
 
 void setup() {
   Serial.begin(9600);
-/*
-  log("Before Ethernet.begin");
-  if (Ethernet.begin(mac) == 0) {
-    log("Ethernet.begin failed.");
+  if (use_network) {
+    log("Before Ethernet.begin");
+    if (Ethernet.begin(mac) == 0) {
+      log("Ethernet.begin failed.");
+    }
+    log("After Ethernet.begin");
+    log(Ethernet.localIP());
+    postToTwitter("Starting dryer monitor.");   
   }
-  log("After Ethernet.begin");
-  log(Ethernet.localIP());
-  postToTwitter("Starting dryer monitor.");
-*/
 }
 
 void sendMessage(char* message) {
   char msg[MAX_MESSAGE_SIZE];
   snprintf(msg, MAX_MESSAGE_SIZE, "Msg: %s", message);
   log(msg);
-//  postToTwitter(message);
+  if (use_network) {
+//    postToTwitter(message);
+  }
 }
 
 char *ftoa(char *a, double f, int precision){
