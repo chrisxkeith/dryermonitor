@@ -6,7 +6,7 @@
 #include <stdio.h>
 #include <SPI.h>
 #include <Ethernet.h>
-#include <Twitter.h>
+#include <Twitter.h> // https://arduino-tweet.appspot.com/
 
 enum test_status_type {
   AUTOMATED,
