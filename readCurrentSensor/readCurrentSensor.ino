@@ -279,9 +279,18 @@ double readAmps() {
   return readActualAmps();
 }
 
-unsigned long waitForPowerChange( boolean (*f)(double, double, double), const unsigned long timeoutDelta) {
+unsigned long waitForPowerChange( boolean insideRange, const unsigned long timeoutDelta) {
   unsigned long start = millis();
-  while ((*f)(readAmps(), AMPS, AMPS * 0.9)) {
+  while (true) {
+    if (insideRange) {
+      if (!withinRangeD(readAmps(), AMPS, AMPS * 0.9)) {
+        break;
+      }
+    } else {
+      if (!outsideRangeD(readAmps(), AMPS, AMPS * 0.9)) {
+        break;
+      }
+    }
     delay(minSecToMillis(0, 1));
     if (millis() - start > timeoutDelta) {
       return TIMEOUT_INDICATOR;
@@ -291,11 +300,11 @@ unsigned long waitForPowerChange( boolean (*f)(double, double, double), const un
 }
 
 unsigned long waitForPowerOn(const long timeoutDelta) {
-  return waitForPowerChange(outsideRangeD, timeoutDelta);
+  return waitForPowerChange(false, timeoutDelta);
 }
 
 unsigned long waitForPowerOff(const long timeoutDelta) {
-  return waitForPowerChange(withinRangeD, timeoutDelta);
+  return waitForPowerChange(true, timeoutDelta);
 }
 
 void doRun() {
