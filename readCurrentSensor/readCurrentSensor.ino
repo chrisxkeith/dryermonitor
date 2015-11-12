@@ -21,9 +21,6 @@ const unsigned long MAX_UNSIGNED_LONG = 4294967295;
 const unsigned int MAX_MESSAGE_SIZE = 96;
 const unsigned long TIMEOUT_INDICATOR = MAX_UNSIGNED_LONG;
 
-                // If any interval takes longer than an hour, something has gone wrong.
-const unsigned long ONE_HOUR = minSecToMillis(60, 0);
-
 const int sensorPin = A0;	// select the input pin for the electrical current sensor.
 char gMessage[MAX_MESSAGE_SIZE] = "";
 double previousAmps = -1.0;
@@ -36,6 +33,8 @@ double AMPS = 7.0;
 unsigned long minSecToMillis(unsigned long minutes, unsigned long seconds) {
   return (minutes * 60 * 1000) + (seconds * 1000);
 }
+                // If any interval takes longer than an hour, something has gone wrong.
+const unsigned long ONE_HOUR = minSecToMillis(60, 0);
 
 char* toFormattedInterval(unsigned long i) {
   unsigned long hours = i / minSecToMillis(60, 0);
