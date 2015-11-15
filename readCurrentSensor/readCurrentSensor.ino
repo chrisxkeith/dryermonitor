@@ -6,15 +6,13 @@
 #include <stdio.h>
 #include <SPI.h>
 #include <Ethernet.h>
-#include <Twitter.h> // https://arduino-tweet.appspot.com/
 
 enum test_status_type {
-  AUTOMATED,
-  MANUAL,
-  NONE
+  AUTOMATED, // Simulates current level changes without using the current sensor.
+  MANUAL,    // Requires current sensor plugged in, sends message when current level changes.
+  NONE       // Waits for power-on/power-off pattern from current sensor to send messages.
 };
-const test_status_type testStatus = AUTOMATED;
-const bool use_network = false;
+const test_status_type testStatus = NONE;
 
 const long MAX_LONG = 2147483647;
 const unsigned long MAX_UNSIGNED_LONG = 4294967295;
@@ -58,44 +56,19 @@ void log(char* message) {
     Serial.println(logLine);
 }
 
-byte mac[] = { 0x90, 0xA2, 0xDA, 0x00, 0xF5, 0xFE };
-// byte ip[] = { 192, 168, 100, 9 };
-Twitter twitter("TODO : Replace this text with your token");
-
-void postToTwitter(char msg[]) {
-  if (twitter.post(msg)) {
-    int status = twitter.wait(&Serial);
-    if (status == 200) {
-      Serial.println("OK.");
-    } else {
-      Serial.print("failed : code ");
-      Serial.println(status);
-    }
-  } else {
-    Serial.println("twitter.post() failed.");
-  }
+void sendMessage(char msg[]) {
+  log(msg);
 }
 
 void setup() {
   Serial.begin(9600);
-  if (use_network) {
-    log("Before Ethernet.begin");
-    if (Ethernet.begin(mac) == 0) {
-      log("Ethernet.begin failed.");
-    }
-    log("After Ethernet.begin");
-    log(Ethernet.localIP());
-    postToTwitter("Starting dryer monitor.");   
+  sendMessage("Before Ethernet.begin");
+  
+  byte mac[] = { 0x90, 0xA2, 0xDA, 0x00, 0xF5, 0xFE };
+  if (Ethernet.begin(mac) == 0) {
+    sendMessage("Ethernet.begin failed.");
   }
-}
-
-void sendMessage(char* message) {
-  char msg[MAX_MESSAGE_SIZE];
-  snprintf(msg, MAX_MESSAGE_SIZE, "Msg: %s", message);
-  log(msg);
-  if (use_network) {
-//    postToTwitter(message);
-  }
+  sendMessage("After Ethernet.begin: Starting dryer monitor.");   
 }
 
 char *ftoa(char *a, double f, int precision){
