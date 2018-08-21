@@ -1,4 +1,4 @@
-// ... IN PROGRESS
+// ... IN PROGRESS ...
 // http://opensource.org/licenses/MIT
 // Please credit : chris.keith@gmail.com
 // Whole project overview : https://goo.gl/BTyQBJ
